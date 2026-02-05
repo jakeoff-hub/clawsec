@@ -1,6 +1,6 @@
 ---
 name: clawsec-suite
-version: 0.0.1
+version: 0.0.2
 description: Use when users or agents want to explore or set up ClawSec security protections - this is a wrapper that helps discover and install individual security skills, but requires initial configuration to activate any protections.
 homepage: https://clawsec.prompt.security
 clawdis:
@@ -235,8 +235,8 @@ All releases are published at:
 
 Example for clawsec-suite v0.0.9:
 
-- `https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.10/checksums.json`
-- `https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.10/clawsec-suite.skill`
+- `https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.2/checksums.json`
+- `https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.2/clawsec-suite.skill`
 
 ## Installation (generic, version-pinned, verified)
 
@@ -338,7 +338,7 @@ The checksums.json structure:
     "clawsec-suite.skill": {
       "sha256": "339a4817aba054e6da5a6d838e2603d16592b43f6bdb7265d6b1918b22fe62cb",
       "size": 4870,
-      "url": "https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.10/clawsec-suite.skill"
+      "url": "https://clawsec.prompt.security/releases/download/clawsec-suite-v0.0.2/clawsec-suite.skill"
     }
   }
 }
