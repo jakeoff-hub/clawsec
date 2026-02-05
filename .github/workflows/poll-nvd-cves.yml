@@ -363,6 +363,13 @@ jobs:
             exit 1
           fi
 
+      - name: Clean workspace for PR
+        if: steps.transform.outputs.new_count != '0' || steps.updates.outputs.update_count != '0'
+        run: |
+          # Reset any unintended changes, keep only feed files
+          git checkout -- .github/ 2>/dev/null || true
+          git clean -fd .github/ 2>/dev/null || true
+
       - name: Create Pull Request
         if: steps.transform.outputs.new_count != '0' || steps.updates.outputs.update_count != '0'
         id: create-pr
