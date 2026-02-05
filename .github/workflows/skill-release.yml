@@ -17,6 +17,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+      CLAWHUB_SITE: ${{ vars.CLAWHUB_SITE }}
+      CLAWHUB_REGISTRY: ${{ vars.CLAWHUB_REGISTRY }}
     steps:
       - name: Parse tag
         id: parse
@@ -113,11 +117,7 @@ jobs:
         run: npm install -g clawhub
 
       - name: Login to ClawHub
-        if: steps.publishable.outputs.publishable == 'true' && secrets.CLAWHUB_TOKEN != ''
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-          CLAWHUB_SITE: ${{ vars.CLAWHUB_SITE }}
-          CLAWHUB_REGISTRY: ${{ vars.CLAWHUB_REGISTRY }}
+        if: steps.publishable.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
         run: |
           set -euo pipefail
           SITE=${CLAWHUB_SITE:-https://clawhub.ai}
@@ -326,11 +326,7 @@ jobs:
           ls -la release-assets/
 
       - name: Publish to ClawHub
-        if: steps.publishable.outputs.publishable == 'true' && secrets.CLAWHUB_TOKEN != ''
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-          CLAWHUB_SITE: ${{ vars.CLAWHUB_SITE }}
-          CLAWHUB_REGISTRY: ${{ vars.CLAWHUB_REGISTRY }}
+        if: steps.publishable.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
         run: |
           set -euo pipefail
           SITE=${CLAWHUB_SITE:-https://clawhub.ai}
