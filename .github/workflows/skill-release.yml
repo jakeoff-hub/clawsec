@@ -8,6 +8,12 @@ on:
     paths:
       - 'skills/*/skill.json'
       - 'skills/*/SKILL.md'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to re-publish to ClawHub (e.g., clawsec-suite-v0.0.10)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -496,8 +502,11 @@ jobs:
   release-tag:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    env:
-      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    outputs:
+      skill_name: ${{ steps.parse.outputs.skill_name }}
+      version: ${{ steps.parse.outputs.version }}
+      skill_path: ${{ steps.parse.outputs.skill_path }}
+      publishable: ${{ steps.publishable.outputs.publishable }}
     steps:
       - name: Parse tag
         id: parse
@@ -658,21 +667,6 @@ jobs:
           echo "Successfully signed embedded advisory artifacts:"
           ls -la "$ADVISORY_DIR"
 
-      - name: Install clawhub CLI
-        if: steps.publishable.outputs.publishable == 'true'
-        run: npm install -g clawhub
-
-      - name: Login to ClawHub
-        if: steps.publishable.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
-        run: |
-          set -euo pipefail
-          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
-          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
-          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
-          mkdir -p "$(dirname "$CLAWHUB_CONFIG_PATH")"
-          CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
-            clawhub login --token "$CLAWHUB_TOKEN" --site "$SITE" --no-input
-
       - name: Package release assets
         run: |
           set -euo pipefail
@@ -793,28 +787,6 @@ jobs:
           echo "Signed and verified release-assets/checksums.json"
           ls -la release-assets/
 
-      - name: Publish to ClawHub
-        if: steps.publishable.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
-        run: |
-          set -euo pipefail
-          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
-          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
-          SKILL_PATH="${{ steps.parse.outputs.skill_path }}"
-          SKILL_NAME="${{ steps.parse.outputs.skill_name }}"
-          VERSION="${{ steps.parse.outputs.version }}"
-          NAME=$(jq -r '.name' "$SKILL_PATH/skill.json")
-          CHANGELOG="Release ${VERSION} via CI"
-
-          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
-          CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
-            clawhub publish "$SKILL_PATH" \
-              --slug "$SKILL_NAME" \
-              --name "$NAME" \
-              --version "$VERSION" \
-              --changelog "$CHANGELOG" \
-              --tags "latest" \
-              --no-input
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
@@ -910,3 +882,198 @@ jobs:
           echo "Superseded release cleanup complete"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-clawhub:
+    # Separate job for ClawHub publishing - runs after GitHub release
+    # Non-blocking: if this fails, the release is still successful
+    # Retriggerable: can be manually triggered for failed publishes
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: release-tag
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      - name: Check if publishable
+        if: needs.release-tag.outputs.publishable != 'true'
+        run: |
+          echo "Skill marked as internal, skipping ClawHub publish"
+          exit 0
+
+      - name: Checkout
+        if: needs.release-tag.outputs.publishable == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node
+        if: needs.release-tag.outputs.publishable == 'true'
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: 20
+
+      - name: Install clawhub CLI
+        if: needs.release-tag.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
+        run: npm install -g clawhub
+
+      - name: Login to ClawHub
+        if: needs.release-tag.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
+        run: |
+          set -euo pipefail
+          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
+          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
+          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
+          mkdir -p "$(dirname "$CLAWHUB_CONFIG_PATH")"
+          CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
+            clawhub login --token "$CLAWHUB_TOKEN" --site "$SITE" --no-input
+
+      - name: Publish to ClawHub
+        if: needs.release-tag.outputs.publishable == 'true' && env.CLAWHUB_TOKEN != ''
+        run: |
+          set -euo pipefail
+          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
+          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
+          SKILL_PATH="${{ needs.release-tag.outputs.skill_path }}"
+          SKILL_NAME="${{ needs.release-tag.outputs.skill_name }}"
+          VERSION="${{ needs.release-tag.outputs.version }}"
+          NAME=$(jq -r '.name' "$SKILL_PATH/skill.json")
+          CHANGELOG="Release ${VERSION} via CI"
+
+          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
+
+          # Publish with idempotent retry handling
+          if ! CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
+            clawhub publish "$SKILL_PATH" \
+              --slug "$SKILL_NAME" \
+              --name "$NAME" \
+              --version "$VERSION" \
+              --changelog "$CHANGELOG" \
+              --tags "latest" \
+              --no-input 2>&1 | tee /tmp/clawhub-publish.log; then
+
+            # Check if it's a "version already exists" error (which means previous run partially succeeded)
+            if grep -qi "version already exists" /tmp/clawhub-publish.log; then
+              echo "::warning::Version $VERSION already published to ClawHub (from previous run)"
+              exit 0
+            else
+              echo "::error::ClawHub publish failed. Check logs above for details."
+              exit 1
+            fi
+          fi
+
+          echo "✓ Successfully published $SKILL_NAME@$VERSION to ClawHub"
+
+  republish-clawhub:
+    # Manual workflow to republish a specific tag to ClawHub
+    # Usage: Go to Actions → Skill Release → Run workflow → Enter tag name
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      - name: Parse tag
+        id: parse
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          # Extract skill name (everything before -v)
+          SKILL_NAME="${TAG%-v*}"
+          # Extract version (everything after -v)
+          VERSION="${TAG#*-v}"
+
+          echo "skill_name=${SKILL_NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "skill_path=skills/${SKILL_NAME}" >> $GITHUB_OUTPUT
+
+          echo "Parsed tag: skill=${SKILL_NAME}, version=${VERSION}"
+
+      - name: Checkout tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Validate skill exists
+        run: |
+          SKILL_PATH="${{ steps.parse.outputs.skill_path }}"
+          if [ ! -d "$SKILL_PATH" ]; then
+            echo "Error: Skill directory not found: $SKILL_PATH"
+            exit 1
+          fi
+          if [ ! -f "$SKILL_PATH/skill.json" ]; then
+            echo "Error: skill.json not found in $SKILL_PATH"
+            exit 1
+          fi
+          echo "Skill validated: $SKILL_PATH"
+
+      - name: Check if publishable
+        id: publishable
+        run: |
+          SKILL_PATH="${{ steps.parse.outputs.skill_path }}"
+          INTERNAL=$(jq -r '.openclaw.internal // false' "$SKILL_PATH/skill.json")
+
+          if [ "$INTERNAL" = "true" ]; then
+            echo "::error::Skill is marked internal and cannot be published to ClawHub"
+            exit 1
+          fi
+
+          echo "Skill is publishable to ClawHub"
+
+      - name: Setup Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: 20
+
+      - name: Install clawhub CLI
+        run: npm install -g clawhub
+
+      - name: Login to ClawHub
+        run: |
+          set -euo pipefail
+          if [ -z "$CLAWHUB_TOKEN" ]; then
+            echo "::error::CLAWHUB_TOKEN secret is not set"
+            exit 1
+          fi
+
+          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
+          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
+          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
+          mkdir -p "$(dirname "$CLAWHUB_CONFIG_PATH")"
+          CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
+            clawhub login --token "$CLAWHUB_TOKEN" --site "$SITE" --no-input
+
+      - name: Publish to ClawHub
+        run: |
+          set -euo pipefail
+          SITE=${CLAWHUB_SITE:-https://clawhub.ai}
+          REGISTRY=${CLAWHUB_REGISTRY:-$SITE}
+          SKILL_PATH="${{ steps.parse.outputs.skill_path }}"
+          SKILL_NAME="${{ steps.parse.outputs.skill_name }}"
+          VERSION="${{ steps.parse.outputs.version }}"
+          NAME=$(jq -r '.name' "$SKILL_PATH/skill.json")
+          CHANGELOG="Manual republish of ${VERSION} via workflow_dispatch"
+
+          export CLAWHUB_CONFIG_PATH="$HOME/.clawhub-ci/config.json"
+
+          echo "Publishing $SKILL_NAME@$VERSION to ClawHub..."
+
+          # Publish with idempotent retry handling
+          if ! CLAWHUB_DISABLE_TELEMETRY=1 CLAWHUB_SITE="$SITE" CLAWHUB_REGISTRY="$REGISTRY" \
+            clawhub publish "$SKILL_PATH" \
+              --slug "$SKILL_NAME" \
+              --name "$NAME" \
+              --version "$VERSION" \
+              --changelog "$CHANGELOG" \
+              --tags "latest" \
+              --no-input 2>&1 | tee /tmp/clawhub-publish.log; then
+
+            # Check if it's a "version already exists" error (which is OK on retry)
+            if grep -qi "version already exists" /tmp/clawhub-publish.log; then
+              echo "::warning::Version $VERSION already published to ClawHub"
+              echo "This is expected if you're retrying a failed publish."
+              echo "✓ Skill is available on ClawHub"
+              exit 0
+            else
+              echo "::error::ClawHub publish failed. Check logs above for details."
+              cat /tmp/clawhub-publish.log
+              exit 1
+            fi
+          fi
+
+          echo "✓ Successfully published $SKILL_NAME@$VERSION to ClawHub"
