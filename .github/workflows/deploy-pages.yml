@@ -3,8 +3,8 @@ name: Deploy to GitHub Pages
 on:
   workflow_run:
     workflows: ["CI", "Skill Release"]
-    branches: [main]
     types: [completed]
+    # Note: No branch restriction - must trigger on both main branch CI runs AND tag-based Skill Releases
   workflow_dispatch:
 
 permissions:
