@@ -20,6 +20,12 @@ export const SkillDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+ const toggleComplete = () => {
+    if (!skillData) return;
+    const updated = { ...skillData, completed: !skillData.completed };
+    setSkillData(updated);
+    localStorage.setItem(`skill-${updated.id}`, JSON.stringify(updated));
+  };
 
   useEffect(() => {
     const fetchSkillData = async () => {
@@ -34,7 +40,8 @@ export const SkillDetail: React.FC = () => {
           throw new Error('Skill not found');
         }
         const skill = await skillResponse.json();
-        setSkillData(skill);
+        const saved = localStorage.getItem(`skill-${skill.id}`);
+setSkillData(saved ? JSON.parse(saved) : skill);
 
         // Fetch checksums.json
         try {
@@ -106,7 +113,7 @@ export const SkillDetail: React.FC = () => {
   };
 
   const installCommand = skillData
-    ? `npx clawhub@latest install ${skillData.name}`
+    ? `jacob-lab install Ports 101 ${skillData.name}`
     : '';
 
   const releasePageUrl = useMemo(() => {
@@ -179,6 +186,12 @@ export const SkillDetail: React.FC = () => {
         </div>
 
         <div className="flex gap-3">
+        <button
+            onClick={toggleComplete}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 rounded-lg text-white hover:bg-purple-500"
+          >
+            {skillData.completed ? 'Completed ✓' : 'Mark Complete'}
+          </button>
           <a
             href={releasePageUrl}
             target="_blank"

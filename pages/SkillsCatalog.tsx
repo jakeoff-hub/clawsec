@@ -15,7 +15,7 @@ export const SkillsCatalog: React.FC = () => {
   useEffect(() => {
     const fetchSkills = async () => {
       try {
-        const response = await fetch('./skills/index.json');
+        const response = await fetch('/skills/index.json');
         if (!response.ok) {
           throw new Error('Failed to fetch skills index');
         }
